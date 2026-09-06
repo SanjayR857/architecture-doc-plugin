@@ -1,11 +1,11 @@
 ---
 description: Analyze module dependencies and generate Mermaid.js architecture diagrams
-allowed-tools: Read, Bash, Glob, Grep, mcp__doc__parse_dependencies, mcp__doc__validate_mermaid, mcp__doc__export_html_preview
+allowed-tools: Read, Bash, Glob, Grep, mcp__doc__parse_dependencies, mcp__doc__validate_mermaid, mcp__doc__export_html_preview, mcp__doc__export_svg
 ---
 
 # Generate Architecture Diagram
 
-Analyze the codebase's module dependencies and generate a Mermaid.js diagram with optional interactive HTML preview.
+Analyze the codebase's module dependencies and generate a Mermaid.js diagram with optional interactive HTML preview and direct headless SVG vector export.
 
 ## Your Task
 
@@ -114,8 +114,9 @@ Before presenting the diagram, ensure it will not fail in GitHub, Notion, or Mer
 
 ---
 
-## Step 4: Export Interactive HTML Preview (Optional/MCP)
+## Step 4: Export Visual Artifacts (Optional/MCP)
 
+### Option A: Interactive HTML Browser Preview
 If MCP `mcp__doc__export_html_preview` is available:
 Call the tool to generate a self-contained HTML preview:
 ```json
@@ -126,6 +127,17 @@ Call the tool to generate a self-contained HTML preview:
 }
 ```
 Report the generated preview link so the user can open it in their browser.
+
+### Option B: Direct Headless Vector SVG Export
+If the user requests vector image output or headless CI export:
+Call `mcp__doc__export_svg` to dump a standalone `.svg` file directly to disk without opening a browser:
+```json
+{
+  "diagram_code": "[validated_mermaid_code]",
+  "output_path": "docs/architecture-diagram.svg"
+}
+```
+Direct vector SVG is ideal for embedding directly in READMEs, documentation sites, and presentations.
 
 ---
 

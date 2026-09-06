@@ -22,12 +22,14 @@ Usage:
 
 import ast
 import asyncio
+import base64
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -676,12 +678,90 @@ def export_html_preview_impl(
     }
 
 
+def export_svg_impl(
+    diagram_code: str,
+    output_path: str = "docs/architecture-diagram.svg",
+) -> Dict[str, Any]:
+    """Export a Mermaid.js diagram directly to an SVG vector file without opening a browser."""
+    clean_code = diagram_code.strip()
+    if clean_code.startswith("```"):
+        lines = clean_code.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        clean_code = "\n".join(lines).strip()
+
+    out_file = Path(output_path).resolve()
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    cloud_error_msg = None
+    # Strategy 1: Fast cloud rendering via Mermaid.ink (built-in urllib standard library)
+    try:
+        encoded = base64.b64encode(clean_code.encode("utf-8")).decode("ascii")
+        url = f"https://mermaid.ink/svg/{encoded}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "architecture-doc-plugin/2.3.0"}
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            svg_content = resp.read().decode("utf-8")
+            if svg_content.startswith("<svg") or "<svg" in svg_content:
+                out_file.write_text(svg_content, encoding="utf-8")
+                return {
+                    "success": True,
+                    "output_file": str(out_file),
+                    "file_url": out_file.as_uri(),
+                    "size_bytes": len(svg_content.encode("utf-8")),
+                    "method": "mermaid.ink",
+                    "message": f"Direct vector SVG exported to: {out_file}",
+                }
+    except Exception as e:
+        cloud_error_msg = str(e)
+
+    # Strategy 2: Local CLI fallback if mmdc is installed
+    import shutil
+    mmdc_bin = shutil.which("mmdc")
+    if mmdc_bin:
+        temp_mmd = out_file.with_suffix(".temp.mmd")
+        temp_mmd.write_text(clean_code, encoding="utf-8")
+        try:
+            proc = subprocess.run(
+                [mmdc_bin, "-i", str(temp_mmd), "-o", str(out_file)],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if proc.returncode == 0 and out_file.exists():
+                return {
+                    "success": True,
+                    "output_file": str(out_file),
+                    "file_url": out_file.as_uri(),
+                    "size_bytes": out_file.stat().st_size,
+                    "method": "mermaid-cli",
+                    "message": f"Direct vector SVG exported to: {out_file}",
+                }
+        finally:
+            if temp_mmd.exists():
+                temp_mmd.unlink()
+
+    return {
+        "success": False,
+        "error": (
+            f"Direct SVG export failed. Cloud renderer error: {cloud_error_msg or 'unknown'}. "
+            "For offline SVG generation, install @mermaid-js/mermaid-cli (npm install -g @mermaid-js/mermaid-cli)."
+        ),
+    }
+
+
 def trace_execution_impl(
     command: str,
     working_dir: str = ".",
     max_depth: int = 8,
     max_events: int = 300,
     export_html: bool = True,
+    export_svg: bool = False,
+    svg_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute a Python test or script in trace mode and produce a sequence diagram."""
     abs_workspace = Path(working_dir).resolve()
@@ -772,6 +852,18 @@ def trace_execution_impl(
             output_path=str(abs_workspace / "docs" / "trace-preview.html"),
         )
         html_preview = preview_res.get("file_url")
+
+    svg_preview = None
+    if export_svg and trace_data.get("mermaid_diagram"):
+        svg_target = svg_path or str(abs_workspace / "docs" / "trace-preview.svg")
+        svg_res = export_svg_impl(
+            diagram_code=trace_data["mermaid_diagram"],
+            output_path=svg_target,
+        )
+        if svg_res.get("success"):
+            svg_preview = svg_res.get("file_url")
+            trace_data["svg_file_path"] = svg_res.get("output_file")
+            trace_data["svg_file_url"] = svg_preview
 
     trace_data["success"] = (proc.returncode == 0) and not trace_data.get("error")
     if html_preview:
@@ -872,11 +964,33 @@ async def handle_list_tools(ctx, params) -> types.ListToolsResult:
                 },
             ),
             types.Tool(
+                name="export_svg",
+                description=(
+                    "Exports a Mermaid.js diagram directly to a standalone vector SVG file on disk "
+                    "without opening a web browser. Supports high-resolution vector rendering."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "diagram_code": {
+                            "type": "string",
+                            "description": "The Mermaid.js diagram code to render as SVG",
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Path where the SVG should be saved (default: docs/architecture-diagram.svg)",
+                            "default": "docs/architecture-diagram.svg",
+                        },
+                    },
+                    "required": ["diagram_code"],
+                },
+            ),
+            types.Tool(
                 name="trace_execution",
                 description=(
                     "Executes a Python script, test case, or pytest command in runtime trace mode. "
                     "Records function calls, inputs, and return values, producing a visual Mermaid.js "
-                    "sequence diagram and step-by-step plain English execution narrative."
+                    "sequence diagram, step-by-step plain English execution narrative, and optional SVG."
                 ),
                 inputSchema={
                     "type": "object",
@@ -904,6 +1018,16 @@ async def handle_list_tools(ctx, params) -> types.ListToolsResult:
                             "type": "boolean",
                             "description": "Whether to generate an interactive HTML preview (default: true)",
                             "default": True,
+                        },
+                        "export_svg": {
+                            "type": "boolean",
+                            "description": "Whether to directly export an SVG vector file without browser (default: false)",
+                            "default": False,
+                        },
+                        "svg_path": {
+                            "type": "string",
+                            "description": "Path where the direct SVG should be saved (default: docs/trace-preview.svg)",
+                            "default": "docs/trace-preview.svg",
                         },
                     },
                     "required": ["command"],
@@ -933,6 +1057,11 @@ async def handle_call_tool(ctx, params: types.CallToolRequestParams) -> types.Ca
                 arguments.get("title", "Architecture Diagram"),
                 arguments.get("output_path", "docs/architecture-preview.html"),
             )
+        elif name == "export_svg":
+            res = export_svg_impl(
+                diagram_code=arguments.get("diagram_code", ""),
+                output_path=arguments.get("output_path", "docs/architecture-diagram.svg"),
+            )
         elif name == "trace_execution":
             res = trace_execution_impl(
                 command=arguments.get("command", ""),
@@ -940,6 +1069,8 @@ async def handle_call_tool(ctx, params: types.CallToolRequestParams) -> types.Ca
                 max_depth=arguments.get("max_depth", 8),
                 max_events=arguments.get("max_events", 300),
                 export_html=arguments.get("export_html", True),
+                export_svg=arguments.get("export_svg", False),
+                svg_path=arguments.get("svg_path"),
             )
         else:
             res = {"error": f"Unknown tool: {name}"}
@@ -958,6 +1089,14 @@ def main():
         print(f"Analyzed files: {res.get('total_files_analyzed', 0)}")
         val = validate_mermaid_impl("flowchart TD\n  A[Start (init)] --> B[End]")
         print(f"Mermaid validation: {val['valid']}, Warnings: {len(val['warnings'])}, Fixed: {val['fixed_diagram']}")
+        print("Testing export_svg tool...")
+        svg_test = export_svg_impl(
+            diagram_code="flowchart TD\n  A[Init] --> B[Run]",
+            output_path=str(Path(test_dir) / "docs" / "selftest.svg"),
+        )
+        print(f"SVG export test: success={svg_test.get('success', False)}, method={svg_test.get('method')}")
+        if Path(test_dir, "docs", "selftest.svg").exists():
+            Path(test_dir, "docs", "selftest.svg").unlink()
         print("Testing trace_execution tool...")
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as tf:

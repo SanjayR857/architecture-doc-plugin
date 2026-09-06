@@ -1,7 +1,7 @@
 ---
 name: architecture-diagramming
-description: Deterministic codebase architecture visualization, module dependency extraction, AST import graph analysis, and Mermaid.js diagram authoring. Use when generating architecture diagrams, analyzing module coupling, detecting circular dependencies, resolving TypeScript path aliases, validating Mermaid syntax, or exporting interactive HTML diagram previews.
-allowed-tools: Read, Bash, Glob, Grep, mcp__doc__parse_dependencies, mcp__doc__validate_mermaid, mcp__doc__export_html_preview
+description: Deterministic codebase architecture visualization, module dependency extraction, AST import graph analysis, Mermaid.js diagram authoring, and direct headless vector SVG export. Use when generating architecture diagrams, analyzing module coupling, detecting circular dependencies, resolving TypeScript path aliases, validating Mermaid syntax, exporting standalone vector SVGs, or exporting interactive HTML diagram previews.
+allowed-tools: Read, Bash, Glob, Grep, mcp__doc__parse_dependencies, mcp__doc__validate_mermaid, mcp__doc__export_html_preview, mcp__doc__export_svg
 ---
 
 # Architecture Diagramming & AST Dependency Analysis Playbook
@@ -91,3 +91,5 @@ Every `subgraph Name["Title"]` MUST have an exact matching `end`. Mismatched cou
    - Automatically wraps unquoted parentheses and verifies subgraph matching.
 3. **`mcp__doc__export_html_preview`**:
    - Generates `docs/architecture-preview.html` with zoom, pan, copy code, and print-to-PDF buttons.
+4. **`mcp__doc__export_svg`**:
+   - Directly renders Mermaid code into a standalone, crisp vector `.svg` file on disk without opening a browser. Ideal for CI pipelines, README embeds, and markdown documents.

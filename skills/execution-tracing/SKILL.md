@@ -1,7 +1,7 @@
 ---
 name: execution-tracing
-description: Runtime code execution tracing, test case workflow analysis, and Mermaid sequence diagram generation. Use when analyzing test cases, debugging unexpected runtime behavior, visualizing call hierarchies, tracing execution flows in pytest or unittest, or turning dynamic code runs into step-by-step visual sequence diagrams.
-allowed-tools: Read, Bash, Glob, Grep, mcp__doc__trace_execution, mcp__doc__validate_mermaid, mcp__doc__export_html_preview
+description: Runtime code execution tracing, test case workflow analysis, Mermaid sequence diagram generation, and headless SVG vector export. Use when analyzing test cases, debugging unexpected runtime behavior, visualizing call hierarchies, tracing execution flows in pytest or unittest, dumping direct vector SVG diagrams, or turning dynamic code runs into step-by-step visual sequence diagrams.
+allowed-tools: Read, Bash, Glob, Grep, mcp__doc__trace_execution, mcp__doc__validate_mermaid, mcp__doc__export_html_preview, mcp__doc__export_svg
 ---
 
 # Runtime Execution Tracing & Sequence Visualizer Playbook
@@ -133,3 +133,30 @@ Whenever presenting trace output to developers, provide the **Four-Pillar Report
    |:----:|:-------|:----------------|:-----------|:-------------------|
    | 1 | `test_orders.py` | `OrderProcessor.process` | `user='Alice'` | `{'status': 'PAID'}` |
 5. **🌐 Interactive HTML Link**: Direct clickable file link to `docs/trace-preview.html`.
+6. **🎨 Direct Vector SVG Export**: Standalone `.svg` vector file at `docs/trace.svg`.
+
+---
+
+## 6. Direct Headless CLI SVG Export (`--export-svg`)
+
+When generating documentation in CI/CD pipelines, containerized environments, or automated scripts where launching a browser is undesirable or impossible, use direct headless SVG export:
+
+### Via CLI:
+```bash
+# Export sequence diagram directly to a vector .svg file:
+python mcp/tracer.py --workspace . --export-svg docs/trace.svg tests/test_orders.py
+
+# Combine with JSON output for automated reporting:
+python mcp/tracer.py --export-svg docs/trace.svg --output docs/trace.json pytest tests/test_checkout.py
+```
+
+### Via MCP Tool:
+```json
+{
+  "command": "pytest tests/test_checkout.py",
+  "export_svg": true,
+  "svg_path": "docs/trace.svg"
+}
+```
+
+The vector `.svg` is generated using standard library zero-dependency rendering (with local `mmdc` fallback), producing production-grade, infinitely zoomable vector diagrams ready for READMEs and documentation portals.

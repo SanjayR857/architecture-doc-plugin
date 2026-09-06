@@ -1,11 +1,11 @@
 ---
 description: Execute a test case or script in trace mode to generate a visual sequence diagram and execution narrative
-allowed-tools: Read, Bash, Glob, Grep, mcp__doc__trace_execution, mcp__doc__validate_mermaid, mcp__doc__export_html_preview
+allowed-tools: Read, Bash, Glob, Grep, mcp__doc__trace_execution, mcp__doc__validate_mermaid, mcp__doc__export_html_preview, mcp__doc__export_svg
 ---
 
 # Trace Execution Flow
 
-Execute any Python test case, script, or pytest target in runtime trace mode to automatically record function calls, input arguments, return values, and exceptions. Produces an exact Mermaid.js sequence diagram, an interactive HTML preview, and a plain-English explanation of the execution workflow.
+Execute any Python test case, script, or pytest target in runtime trace mode to automatically record function calls, input arguments, return values, and exceptions. Produces an exact Mermaid.js sequence diagram, an interactive HTML preview, a headless vector SVG export, and a plain-English explanation of the execution workflow.
 
 ## Your Task
 
@@ -16,6 +16,7 @@ Execute any Python test case, script, or pytest target in runtime trace mode to 
    - A **Plain-English Narrative** explaining the workflow step by step.
    - A **Variable & State Table** capturing inputs, outputs, and return values.
    - An **Interactive HTML Preview** for zoomable browser inspection.
+   - A **Direct Headless Vector SVG File** (`docs/trace.svg`) on disk without requiring browser launch.
 
 **Arguments**: `$ARGUMENTS` (e.g., `pytest tests/test_order.py`, `python test_cart.py`, or `test_checkout.py`)
 
@@ -44,7 +45,9 @@ Call the `mcp__doc__trace_execution` tool:
   "working_dir": ".",
   "max_depth": 8,
   "max_events": 300,
-  "export_html": true
+  "export_html": true,
+  "export_svg": true,
+  "svg_path": "docs/trace.svg"
 }
 ```
 
@@ -53,13 +56,15 @@ The tool returns:
 - `mermaid_diagram`: Clean Mermaid sequence diagram.
 - `narrative`: Step-by-step flow explanation.
 - `html_preview_url`: Local file URI to the interactive browser preview.
+- `svg_file_path`: Path to the exported standalone vector SVG file.
 - `total_events` and `duration_ms`: Performance metrics.
 
-### Method B: Via CLI (Fallback)
-If the MCP server is not active, execute the bundled tracer directly:
+### Method B: Via CLI (Direct Headless SVG Export)
+If the MCP server is not active, execute the bundled tracer directly from terminal:
 
 ```bash
-python mcp/tracer.py --workspace . --output docs/trace.json $ARGUMENTS
+# Dump vector SVG directly to disk without browser:
+python mcp/tracer.py --workspace . --export-svg docs/trace.svg --output docs/trace.json $ARGUMENTS
 ```
 
 Then read `docs/trace.json` to extract the timeline and sequence diagram.
@@ -109,3 +114,8 @@ Explain the flow in clear, narrative language so the user can understand how the
 Provide the clickable link to the generated HTML preview:
 - `docs/trace-preview.html`
 - Instruct the user that they can open this file in any browser to pan, zoom, and inspect the sequence diagram visually.
+
+### 6. 🎨 Direct Headless Vector SVG Export
+Provide the path to the standalone vector SVG file:
+- `docs/trace.svg`
+- Clean, standalone SVG vector format ready to embed directly into Markdown, GitHub wikis, Notion, or slides without needing to launch a web browser.

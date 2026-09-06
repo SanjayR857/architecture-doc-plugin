@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "architecture-doc-plugin",
-      "description": "A production-grade codebase architecture documentation plugin for Claude Code. Features AST-level dependency graph extraction, runtime execution flow tracing with sequence diagrams (/trace-flow), TypeScript path alias resolution, deterministic API endpoint discovery, Mermaid.js syntax validation, interactive HTML previewing, and automated CI/CD documentation workflows.",
-      "version": "2.2.0",
+      "description": "A production-grade codebase architecture documentation plugin for Claude Code. Features AST-level dependency graph extraction, runtime execution flow tracing with sequence diagrams (/trace-flow), headless CLI SVG vector export (--export-svg), TypeScript path alias resolution, deterministic API endpoint discovery, Mermaid.js syntax validation, interactive HTML previewing, and automated CI/CD documentation workflows.",
+      "version": "2.3.0",
       "source": "./",
       "category": "development"
     }

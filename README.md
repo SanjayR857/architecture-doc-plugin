@@ -1,10 +1,10 @@
-# Architecture Doc Plugin (v2.2.0)
+# Architecture Doc Plugin (v2.3.0)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A production-grade automated codebase documentation, architecture visualization, and runtime execution tracing plugin for Claude Code.
 
-Extract real AST module dependency graphs, trace test execution flows into interactive Mermaid sequence diagrams (`/trace-flow`), resolve TypeScript path aliases (`@/*`), discover REST API endpoints deterministically, generate validated Mermaid.js diagrams, export interactive HTML browser previews, and automate documentation freshness with pre-commit hooks.
+Extract real AST module dependency graphs, trace test execution flows into interactive Mermaid sequence diagrams (`/trace-flow`), export standalone vector SVG diagrams headlessly directly to disk (`--export-svg`), resolve TypeScript path aliases (`@/*`), discover REST API endpoints deterministically, generate validated Mermaid.js diagrams, export interactive HTML browser previews, and automate documentation freshness with pre-commit hooks.
 
 ---
 
@@ -85,8 +85,8 @@ architecture-doc-plugin/
 
 | Command | Description | MCP-Enhanced Mode |
 |---|---|---|
-| `/trace-flow [test_or_script]` | Traces runtime execution and generates sequence diagrams + narrative | Runs zero-dependency tracer, records calls/args/returns, builds nested sequence diagram, and exports HTML preview |
-| `/gen-diagram [dir or type]` | Generates Mermaid.js diagrams (Flowchart, Sequence, Class) | Uses real AST parsing + TypeScript alias resolution, validates syntax, and exports interactive HTML preview |
+| `/trace-flow [test_or_script]` | Traces runtime execution and generates sequence diagrams + narrative | Runs zero-dependency tracer, records calls/args/returns, builds nested sequence diagram, and exports HTML preview + direct headless SVG |
+| `/gen-diagram [dir or type]` | Generates Mermaid.js diagrams (Flowchart, Sequence, Class) | Uses real AST parsing + TypeScript alias resolution, validates syntax, and exports interactive HTML preview + direct headless SVG |
 | `/api-spec [dir or format]` | Generates Markdown or OpenAPI 3.0 YAML specs | Scans route decorators deterministically across FastAPI, Flask, Express, Hono |
 | `/explain-file <file_path>` | Creates an onboarding breakdown of complex source files | Inspects inbound and outbound coupling using the project dependency graph |
 | `/doc-setup` | Wizard to install dependencies and register the bundled MCP server | Checks environment and connects `doc-tools` to Claude Code |
@@ -95,13 +95,14 @@ architecture-doc-plugin/
 
 ## 🔌 Bundled MCP Server (`mcp/doc_mcp_server.py`)
 
-The included MCP server provides 5 deterministic tools:
+The included MCP server provides 6 deterministic tools:
 
-1. `trace_execution` — Runs any Python test case or script under trace mode. Records chronological function calls, arguments, and return values, emitting a clean Mermaid sequence diagram with activation lifelines and HTML preview.
-2. `parse_dependencies` — AST parsing for Python and token parsing for JS/TS/Go. Supports `tsconfig.json` path mapping (`@/*`), identifies circular dependencies, and computes architectural coupling without fragile regex pipelines.
-3. `extract_api_routes` — Discovers HTTP endpoints, route paths, handlers, docstrings, and parameters across FastAPI, Flask, Express, and Hono.
-4. `validate_mermaid` — Checks Mermaid syntax for unquoted parentheses, unclosed subgraphs, and invalid arrow tokens to guarantee zero-error rendering.
-5. `export_html_preview` — Generates a self-contained HTML page with embedded Mermaid.js, zoom/pan controls, and print/PDF export at `docs/architecture-preview.html`.
+1. `trace_execution` — Runs any Python test case or script under trace mode. Records chronological function calls, arguments, and return values, emitting a clean Mermaid sequence diagram with activation lifelines, HTML preview, and direct SVG export.
+2. `export_svg` — Renders Mermaid code directly into a standalone vector `.svg` file on disk without opening a browser (uses standard library zero-dependency rendering with local `mmdc` fallback).
+3. `parse_dependencies` — AST parsing for Python and token parsing for JS/TS/Go. Supports `tsconfig.json` path mapping (`@/*`), identifies circular dependencies, and computes architectural coupling without fragile regex pipelines.
+4. `extract_api_routes` — Discovers HTTP endpoints, route paths, handlers, docstrings, and parameters across FastAPI, Flask, Express, and Hono.
+5. `validate_mermaid` — Checks Mermaid syntax for unquoted parentheses, unclosed subgraphs, and invalid arrow tokens to guarantee zero-error rendering.
+6. `export_html_preview` — Generates a self-contained HTML page with embedded Mermaid.js, zoom/pan controls, and print/PDF export at `docs/architecture-preview.html`.
 
 Run the self-test locally anytime:
 ```bash
@@ -170,6 +171,19 @@ Inspect parameters, return values, and caller/callee relations:
 
 #### D. Interactive Browser Preview (`docs/trace-preview.html`)
 Double-click to open in any web browser with pan, zoom, copy-to-clipboard, and print-to-PDF capabilities.
+
+#### E. Direct Headless Vector SVG Export (`--export-svg`)
+Dump standalone vector `.svg` files directly to disk without launching a web browser:
+
+```bash
+# Export vector SVG directly via tracer CLI
+python mcp/tracer.py --export-svg docs/trace.svg tests/test_order.py
+
+# Or specify custom path and capture JSON output simultaneously
+python mcp/tracer.py --export-svg docs/architecture-flow.svg --output docs/trace.json pytest tests/
+```
+
+Perfect for automated CI/CD pipelines, Docker environments, and embedding crisp vector graphics directly into GitHub READMEs, Notion, and documentation sites.
 
 ---
 

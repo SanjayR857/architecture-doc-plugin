@@ -19,17 +19,24 @@ Usage:
   # Trace with pytest or custom module
   python mcp/tracer.py -m pytest tests/test_order.py
 
+  # Dump vector SVG directly to disk without opening a browser
+  python mcp/tracer.py --export-svg docs/trace.svg tests/test_order.py
+
   # Output to specific JSON file
   python mcp/tracer.py --output docs/trace.json tests/test_order.py
 """
 
 import argparse
+import base64
 import inspect
 import json
 import os
 import runpy
+import shutil
+import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -383,6 +390,77 @@ class ExecutionTracer:
         }
 
 
+
+def export_svg_file(diagram_code: str, output_path: str) -> Dict[str, Any]:
+    """
+    Render a Mermaid sequence diagram directly into a standalone vector SVG file.
+    Uses mermaid.ink cloud renderer as primary (zero-dep) with local mmdc CLI fallback.
+    """
+    clean_code = diagram_code.strip()
+    if clean_code.startswith("```mermaid"):
+        clean_code = clean_code[len("```mermaid"):].strip()
+    if clean_code.startswith("```"):
+        clean_code = clean_code[3:].strip()
+    if clean_code.endswith("```"):
+        clean_code = clean_code[:-3].strip()
+
+    out_file = Path(output_path).resolve()
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    cloud_error_msg = None
+    # Strategy 1: mermaid.ink vector SVG API (zero dependencies)
+    try:
+        encoded = base64.b64encode(clean_code.encode("utf-8")).decode("ascii")
+        url = f"https://mermaid.ink/svg/{encoded}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "architecture-doc-plugin/2.3.0"}
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            svg_content = resp.read().decode("utf-8")
+            if "<svg" in svg_content:
+                out_file.write_text(svg_content, encoding="utf-8")
+                return {
+                    "success": True,
+                    "path": str(out_file),
+                    "size_bytes": len(svg_content.encode("utf-8")),
+                    "method": "mermaid.ink",
+                }
+    except Exception as e:
+        cloud_error_msg = str(e)
+
+    # Strategy 2: Local CLI fallback if @mermaid-js/mermaid-cli (mmdc) is installed
+    mmdc_bin = shutil.which("mmdc")
+    if mmdc_bin:
+        temp_mmd = out_file.with_suffix(".temp.mmd")
+        temp_mmd.write_text(clean_code, encoding="utf-8")
+        try:
+            proc = subprocess.run(
+                [mmdc_bin, "-i", str(temp_mmd), "-o", str(out_file)],
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            if proc.returncode == 0 and out_file.exists():
+                return {
+                    "success": True,
+                    "path": str(out_file),
+                    "size_bytes": out_file.stat().st_size,
+                    "method": "mermaid-cli",
+                }
+        finally:
+            if temp_mmd.exists():
+                temp_mmd.unlink()
+
+    return {
+        "success": False,
+        "error": (
+            f"Direct SVG export failed. Cloud renderer error: {cloud_error_msg or 'unknown'}. "
+            "For offline SVG generation, install @mermaid-js/mermaid-cli (npm install -g @mermaid-js/mermaid-cli)."
+        ),
+    }
+
+
 def run_and_trace_script(
     target_path: str,
     script_args: List[str],
@@ -390,6 +468,7 @@ def run_and_trace_script(
     max_depth: int = 8,
     max_events: int = 300,
     is_module: bool = False,
+    export_svg: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute a target Python script, module, or code string while tracing execution."""
     is_code_eval = (target_path == "-c")
@@ -443,6 +522,15 @@ def run_and_trace_script(
     if error_msg:
         res["error"] = error_msg
 
+    if export_svg and res.get("mermaid_diagram"):
+        svg_res = export_svg_file(res["mermaid_diagram"], export_svg)
+        if svg_res.get("success"):
+            res["svg_file_path"] = svg_res.get("path")
+            res["svg_success"] = True
+        else:
+            res["svg_error"] = svg_res.get("error")
+            res["svg_success"] = False
+
     return res
 
 
@@ -459,6 +547,13 @@ def main():
     parser.add_argument("-e", "--max-events", type=int, default=300, help="Max events to capture")
     parser.add_argument("-m", "--module", action="store_true", help="Treat target as a module name (like python -m)")
     parser.add_argument("--mermaid-only", action="store_true", help="Output only the Mermaid diagram")
+    parser.add_argument(
+        "--export-svg",
+        nargs="?",
+        const="docs/trace.svg",
+        default=None,
+        help="Directly export vector .svg file to disk without opening a browser (default: docs/trace.svg)",
+    )
 
     args, unknown = parser.parse_known_args()
     all_target_args = args.target_args + unknown
@@ -480,7 +575,14 @@ def main():
         max_depth=args.max_depth,
         max_events=args.max_events,
         is_module=args.module,
+        export_svg=args.export_svg,
     )
+
+    if args.export_svg:
+        if res.get("svg_success"):
+            sys.stderr.write(f"[SVG Export] Successfully saved vector diagram to: {res.get('svg_file_path')}\n")
+        elif res.get("svg_error"):
+            sys.stderr.write(f"[SVG Export Warning] Could not export SVG: {res.get('svg_error')}\n")
 
     if args.mermaid_only:
         print(res["mermaid_diagram"])
@@ -494,6 +596,8 @@ def main():
         print(f"Trace result saved to: {out_path}")
         print(f"Events captured: {res['total_events']}")
         print(f"Duration: {res['duration_ms']} ms")
+        if res.get("svg_file_path"):
+            print(f"Vector SVG saved to: {res['svg_file_path']}")
     else:
         print(json_str)
 
