@@ -59,9 +59,9 @@ Expected tools:
 - `mcp__doc__validate_mermaid` — Mermaid syntax validator and auto-fixer
 - `mcp__doc__export_html_preview` — Standalone HTML diagram viewer with SVG export
 
-## Step 5: Test on Sample Project
+## Step 5: Run Self-Test
 
-Test the setup immediately on the bundled sample project:
+Verify the setup:
 
 ```bash
 python mcp/doc_mcp_server.py --test
@@ -73,15 +73,16 @@ Report:
 ║             ARCHITECTURE DOC SETUP COMPLETE                 ║
 ╚══════════════════════════════════════════════════════════════╝
 
-✅ MCP Server: doc-tools (v2.0.0)
+✅ MCP Server: doc-tools (v2.1.0)
 ✅ Registered Tools:
    - parse_dependencies (AST-level dependency resolution)
    - extract_api_routes (Deterministic route discovery)
    - validate_mermaid   (Zero-error diagram syntax checker)
    - export_html_preview (Interactive browser diagram previewer)
 
-📋 Try it now:
-   - /gen-diagram examples/sample_project
-   - /api-spec examples/sample_project
-   - /explain-file examples/sample_project/services/order_service.py
+📋 Try it now on any project:
+   - /gen-diagram
+   - /api-spec
+   - /explain-file path/to/any/file.py
 ```
+

@@ -27,16 +27,16 @@ pip install -r mcp/requirements.txt
 claude mcp add doc-tools --scope user -- python mcp/doc_mcp_server.py
 ```
 
-### 3. Immediate Hands-On Test on Polyglot Sample Project
+### 3. Immediate Usage on Any Repository
 ```bash
-# Generate architecture diagram for the sample microservice (Python + TypeScript):
-/gen-diagram examples/sample_project
+# Generate architecture diagram for your current project:
+/gen-diagram
 
 # Scan and document all REST endpoints:
-/api-spec examples/sample_project
+/api-spec
 
-# Deep-dive into a specific service file:
-/explain-file examples/sample_project/services/order_service.py
+# Deep-dive into any complex file:
+/explain-file path/to/any/file.py
 ```
 
 ---
@@ -49,7 +49,7 @@ architecture-doc-plugin/
 │   └── plugin.json                     # Plugin manifest (v2.1.0)
 ├── .github/
 │   └── workflows/
-│       └── doc-check.yml               # GitHub Actions CI documentation pipeline
+│       └── doc-check.yml               # GitHub Actions CI pipeline
 ├── commands/
 │   ├── gen-diagram.md                  # Mermaid diagram generator + syntax validation & HTML preview
 │   ├── api-spec.md                     # Deterministic REST endpoint scanner (Markdown & OpenAPI 3.0)
@@ -59,17 +59,7 @@ architecture-doc-plugin/
 │   ├── doc_mcp_server.py               # AST dependency parser, TS alias resolver, route extractor
 │   └── requirements.txt                # Minimal Python dependencies (mcp>=1.0.0)
 ├── examples/
-│   ├── sample_project/                 # Polyglot microservice (FastAPI + TypeScript Client)
-│   │   ├── app.py                      # FastAPI entry point
-│   │   ├── tsconfig.json               # TypeScript path alias definitions (@/*)
-│   │   ├── frontend/                   # api_client.ts, auth_context.ts, types.ts
-│   │   ├── routes/                     # auth_routes.py, order_routes.py
-│   │   ├── services/                   # auth_service.py, order_service.py
-│   │   ├── models/                     # user.py, order.py
-│   │   └── db/                         # database.py
 │   └── hooks.json                      # Drop-in automation hooks template
-├── tests/
-│   └── test_doc_mcp_server.py          # Complete unit test suite (AST, TS aliases, API routes, Mermaid)
 ├── docs/
 │   └── hooks-examples.md               # Ready-to-use hooks recipes
 └── skills/
@@ -101,19 +91,17 @@ The included MCP server provides 4 deterministic tools:
 
 ---
 
-## 🧪 Automated Testing & CI/CD
-
-Run the test suite locally:
-```bash
-python -m unittest discover tests
-```
+## 🧪 CI/CD & Automated Verification
 
 ### GitHub Actions CI Workflow
 The repository includes [`.github/workflows/doc-check.yml`](.github/workflows/doc-check.yml):
 - Matrix testing across Python 3.10, 3.11, 3.12, 3.13
-- Automated unit test validation
-- Dependency and route extraction verification on sample code
-- Uploads the generated `docs/architecture-preview.html` as a workflow artifact
+- Automated Python compilation and MCP self-test validation on every push and PR
+
+Run the self-test locally:
+```bash
+python mcp/doc_mcp_server.py --test
+```
 
 ---
 

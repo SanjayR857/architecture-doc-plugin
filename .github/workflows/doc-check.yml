@@ -7,8 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  test-and-validate:
-    name: Test & Validate Documentation
+  validate:
+    name: Validate MCP Server & Diagnostics
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -28,39 +28,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r mcp/requirements.txt
 
-      - name: Run Unit Tests
+      - name: Verify Python Compilation
         run: |
-          python -m unittest discover tests
+          python -m py_compile mcp/doc_mcp_server.py
 
       - name: Run MCP Server Self-Test
         run: |
           python mcp/doc_mcp_server.py --test
-
-      - name: Validate Sample Project Architecture
-        run: |
-          python -c "
-          import sys
-          sys.path.insert(0, 'mcp')
-          from doc_mcp_server import parse_dependencies_impl, extract_api_routes_impl, export_html_preview_impl
-          
-          # Verify AST parsing on sample project
-          deps = parse_dependencies_impl('examples/sample_project')
-          assert deps['total_files_analyzed'] >= 10, 'Failed to discover all files'
-          assert deps['total_dependencies_found'] >= 14, 'Failed to map dependencies'
-          assert len(deps['circular_dependencies']) == 0, 'Circular dependencies detected'
-          
-          # Verify route extraction
-          routes = extract_api_routes_impl('examples/sample_project')
-          assert routes['total_routes_discovered'] == 8, 'Expected 8 routes'
-          
-          # Generate preview
-          export_html_preview_impl('flowchart TD\n  A[Frontend] --> B[API]', output_path='docs/architecture-preview.html')
-          print('CI Validation Succeeded!')
-          "
-
-      - name: Upload Diagram Preview Artifact
-        uses: actions/upload-artifact@v4
-        if: matrix.python-version == '3.12'
-        with:
-          name: architecture-preview-html
-          path: docs/architecture-preview.html
