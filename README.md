@@ -69,8 +69,14 @@ architecture-doc-plugin/
 ├── docs/
 │   └── hooks-examples.md               # Ready-to-use hooks recipes
 └── skills/
+    ├── architecture-diagramming/
+    │   └── SKILL.md                    # AST dependency graphs, layer clustering, Mermaid syntax rules
+    ├── execution-tracing/
+    │   └── SKILL.md                    # Runtime sys.settrace tracking, pytest/unittest runners, sequence lifelines
+    ├── api-specification/
+    │   └── SKILL.md                    # Route extraction (FastAPI/Flask/Express/Hono) & OpenAPI 3.0
     └── codebase-documentation/
-        └── SKILL.md                    # Comprehensive documentation engineering standards
+        └── SKILL.md                    # Documentation hierarchy, file explanations, freshness standards
 ```
 
 ---

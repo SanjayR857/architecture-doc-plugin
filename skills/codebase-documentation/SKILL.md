@@ -16,18 +16,20 @@ Good documentation operates at multiple levels. Each level serves a different au
 |-------|----------|---------|------|
 | **Architecture** | New team members, architects | System-level diagrams, module relationships, data flow | `/gen-diagram` |
 | **API Reference** | Frontend devs, integrators | Endpoints, parameters, response formats, error codes | `/api-spec` |
+| **Runtime Flow** | Developers debugging workflows | Dynamic function call flow, parameter snapshots, sequence lifelines | `/trace-flow` |
 | **File/Module** | Developers working on specific features | Detailed code breakdown, gotchas, related files | `/explain-file` |
 | **Inline** | Developers reading the code | Comments, JSDoc/docstrings, type annotations | Manual |
 
 ### When to Use Each Command
 
-| Situation | Command |
-|-----------|---------|
-| Onboarding a new developer | `/gen-diagram` → `/api-spec` → `/explain-file` (key files) |
-| Starting a new feature | `/explain-file` on files you'll modify |
-| Code review | `/explain-file` on changed files for context |
-| Planning a refactor | `/gen-diagram` to understand impact |
-| Writing integration docs | `/api-spec` for endpoint reference |
+| Situation | Command | Specialized Skill |
+|-----------|---------|-------------------|
+| Onboarding a new developer | `/gen-diagram` → `/api-spec` → `/explain-file` | `architecture-diagramming` |
+| Debugging unexpected test/code behavior | `/trace-flow` | `execution-tracing` |
+| Starting a new feature | `/explain-file` on files you'll modify | `codebase-documentation` |
+| Code review | `/explain-file` on changed files for context | `codebase-documentation` |
+| Planning a refactor | `/gen-diagram` to understand impact | `architecture-diagramming` |
+| Writing integration docs | `/api-spec` for endpoint reference | `api-specification` |
 
 ---
 
