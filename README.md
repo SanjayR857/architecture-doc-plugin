@@ -1,11 +1,10 @@
 # Architecture Doc Plugin (v2.1.0)
 
-[![CI](https://github.com/SanjayR857/architecture-doc-plugin/actions/workflows/doc-check.yml/badge.svg)](https://github.com/SanjayR857/architecture-doc-plugin/actions/workflows/doc-check.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A production-grade automated codebase documentation and architecture visualization plugin for Claude Code.
 
-Extract real AST module dependency graphs, resolve TypeScript path aliases (`@/*`), discover REST API endpoints deterministically, generate validated Mermaid.js diagrams, export interactive HTML browser previews, and automate documentation freshness with pre-commit hooks and GitHub Actions CI.
+Extract real AST module dependency graphs, resolve TypeScript path aliases (`@/*`), discover REST API endpoints deterministically, generate validated Mermaid.js diagrams, export interactive HTML browser previews, and automate documentation freshness with pre-commit hooks.
 
 ---
 
@@ -47,9 +46,6 @@ claude mcp add doc-tools --scope user -- python mcp/doc_mcp_server.py
 architecture-doc-plugin/
 ├── .claude-plugin/
 │   └── plugin.json                     # Plugin manifest (v2.1.0)
-├── .github/
-│   └── workflows/
-│       └── doc-check.yml               # GitHub Actions CI pipeline
 ├── commands/
 │   ├── gen-diagram.md                  # Mermaid diagram generator + syntax validation & HTML preview
 │   ├── api-spec.md                     # Deterministic REST endpoint scanner (Markdown & OpenAPI 3.0)
@@ -89,16 +85,7 @@ The included MCP server provides 4 deterministic tools:
 3. `validate_mermaid` — Checks Mermaid syntax for unquoted parentheses, unclosed subgraphs, and invalid arrow tokens to guarantee zero-error rendering.
 4. `export_html_preview` — Generates a self-contained HTML page with embedded Mermaid.js, zoom/pan controls, and print/PDF export at `docs/architecture-preview.html`.
 
----
-
-## 🧪 CI/CD & Automated Verification
-
-### GitHub Actions CI Workflow
-The repository includes [`.github/workflows/doc-check.yml`](.github/workflows/doc-check.yml):
-- Matrix testing across Python 3.10, 3.11, 3.12, 3.13
-- Automated Python compilation and MCP self-test validation on every push and PR
-
-Run the self-test locally:
+Run the self-test locally anytime:
 ```bash
 python mcp/doc_mcp_server.py --test
 ```
