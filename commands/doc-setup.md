@@ -20,8 +20,8 @@ claude mcp list | grep -i doc-tools || echo "doc-tools not registered"
 ```
 
 If already registered:
-- Confirm active tools: `parse_dependencies`, `extract_api_routes`, `validate_mermaid`, `export_html_preview`.
-- Report that the plugin is fully equipped for live AST analysis.
+- Confirm active tools: `parse_dependencies`, `extract_api_routes`, `validate_mermaid`, `export_html_preview`, `trace_execution`.
+- Report that the plugin is fully equipped for live AST analysis and runtime execution tracing.
 
 ## Step 2: Install MCP Dependencies
 
@@ -58,6 +58,7 @@ Expected tools:
 - `mcp__doc__extract_api_routes` — Deterministic REST endpoint discovery for FastAPI, Flask, Express
 - `mcp__doc__validate_mermaid` — Mermaid syntax validator and auto-fixer
 - `mcp__doc__export_html_preview` — Standalone HTML diagram viewer with SVG export
+- `mcp__doc__trace_execution` — Zero-dependency runtime execution tracer and sequence diagram generator
 
 ## Step 5: Run Self-Test
 
@@ -73,16 +74,18 @@ Report:
 ║             ARCHITECTURE DOC SETUP COMPLETE                 ║
 ╚══════════════════════════════════════════════════════════════╝
 
-✅ MCP Server: doc-tools (v2.1.0)
+✅ MCP Server: doc-tools (v2.2.0)
 ✅ Registered Tools:
    - parse_dependencies (AST-level dependency resolution)
    - extract_api_routes (Deterministic route discovery)
    - validate_mermaid   (Zero-error diagram syntax checker)
    - export_html_preview (Interactive browser diagram previewer)
+   - trace_execution     (Runtime test tracer & sequence visualizer)
 
 📋 Try it now on any project:
    - /gen-diagram
    - /api-spec
    - /explain-file path/to/any/file.py
+   - /trace-flow pytest tests/test_order.py
 ```
 

@@ -25,6 +25,8 @@ import asyncio
 import json
 import os
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -674,6 +676,111 @@ def export_html_preview_impl(
     }
 
 
+def trace_execution_impl(
+    command: str,
+    working_dir: str = ".",
+    max_depth: int = 8,
+    max_events: int = 300,
+    export_html: bool = True,
+) -> Dict[str, Any]:
+    """Execute a Python test or script in trace mode and produce a sequence diagram."""
+    abs_workspace = Path(working_dir).resolve()
+    tracer_path = Path(__file__).parent / "tracer.py"
+    if not tracer_path.exists():
+        return {"success": False, "error": f"Tracer script not found at {tracer_path}"}
+
+    raw_cmd = command.strip()
+    try:
+        parts = shlex.split(raw_cmd, posix=False)
+    except Exception:
+        parts = raw_cmd.split()
+
+    parts = [p.strip('"\'') for p in parts if p.strip('"\'')]
+
+    if not parts:
+        return {"success": False, "error": "Command cannot be empty"}
+
+    # Strip leading python invocation if present
+    first = parts[0].lower()
+    if first in ("python", "python3", "py") or first.endswith("python.exe"):
+        parts = parts[1:]
+
+    if not parts:
+        return {"success": False, "error": "No script or module specified after python"}
+
+    is_module = False
+    if parts[0] == "-m":
+        is_module = True
+        parts = parts[1:]
+        if not parts:
+            return {"success": False, "error": "Missing module name after -m"}
+        target = parts[0]
+        extra_args = parts[1:]
+    elif parts[0].lower() in ("pytest", "pytest.exe"):
+        is_module = True
+        target = "pytest"
+        extra_args = parts[1:]
+    else:
+        target = parts[0]
+        extra_args = parts[1:]
+
+    tracer_args = [
+        sys.executable,
+        str(tracer_path),
+        "-w",
+        str(abs_workspace),
+        "-d",
+        str(max_depth),
+        "-e",
+        str(max_events),
+    ]
+    if is_module:
+        tracer_args.append("-m")
+    tracer_args.append(target)
+    tracer_args.extend(extra_args)
+
+    try:
+        proc = subprocess.run(
+            tracer_args,
+            capture_output=True,
+            text=True,
+            cwd=str(abs_workspace),
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Execution timed out after 120 seconds"}
+    except Exception as e:
+        return {"success": False, "error": f"Failed to execute tracer: {str(e)}"}
+
+    out_text = proc.stdout.strip()
+    try:
+        trace_data = json.loads(out_text)
+    except Exception:
+        return {
+            "success": False,
+            "error": "Failed to parse tracer JSON output",
+            "stdout": out_text,
+            "stderr": proc.stderr,
+            "exit_code": proc.returncode,
+        }
+
+    html_preview = None
+    if export_html and trace_data.get("mermaid_diagram"):
+        preview_res = export_html_preview_impl(
+            diagram_code=trace_data["mermaid_diagram"],
+            title=f"Execution Trace: {target}",
+            output_path=str(abs_workspace / "docs" / "trace-preview.html"),
+        )
+        html_preview = preview_res.get("file_url")
+
+    trace_data["success"] = (proc.returncode == 0) and not trace_data.get("error")
+    if html_preview:
+        trace_data["html_preview_url"] = html_preview
+        trace_data["html_preview_path"] = str(abs_workspace / "docs" / "trace-preview.html")
+
+    return trace_data
+
+
 # ---------------------------------------------------------------------------
 # MCP Server Handlers
 # ---------------------------------------------------------------------------
@@ -764,6 +871,44 @@ async def handle_list_tools(ctx, params) -> types.ListToolsResult:
                     "required": ["diagram_code"],
                 },
             ),
+            types.Tool(
+                name="trace_execution",
+                description=(
+                    "Executes a Python script, test case, or pytest command in runtime trace mode. "
+                    "Records function calls, inputs, and return values, producing a visual Mermaid.js "
+                    "sequence diagram and step-by-step plain English execution narrative."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "Python command or script to execute (e.g., 'pytest tests/test_login.py' or 'test_cart.py')",
+                        },
+                        "working_dir": {
+                            "type": "string",
+                            "description": "Root working directory of the project (default: '.')",
+                            "default": ".",
+                        },
+                        "max_depth": {
+                            "type": "integer",
+                            "description": "Maximum function call depth to trace (default: 8)",
+                            "default": 8,
+                        },
+                        "max_events": {
+                            "type": "integer",
+                            "description": "Maximum call events to record (default: 300)",
+                            "default": 300,
+                        },
+                        "export_html": {
+                            "type": "boolean",
+                            "description": "Whether to generate an interactive HTML preview (default: true)",
+                            "default": True,
+                        },
+                    },
+                    "required": ["command"],
+                },
+            ),
         ]
     )
 
@@ -788,6 +933,14 @@ async def handle_call_tool(ctx, params: types.CallToolRequestParams) -> types.Ca
                 arguments.get("title", "Architecture Diagram"),
                 arguments.get("output_path", "docs/architecture-preview.html"),
             )
+        elif name == "trace_execution":
+            res = trace_execution_impl(
+                command=arguments.get("command", ""),
+                working_dir=arguments.get("working_dir", "."),
+                max_depth=arguments.get("max_depth", 8),
+                max_events=arguments.get("max_events", 300),
+                export_html=arguments.get("export_html", True),
+            )
         else:
             res = {"error": f"Unknown tool: {name}"}
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(res, indent=2))])
@@ -805,6 +958,21 @@ def main():
         print(f"Analyzed files: {res.get('total_files_analyzed', 0)}")
         val = validate_mermaid_impl("flowchart TD\n  A[Start (init)] --> B[End]")
         print(f"Mermaid validation: {val['valid']}, Warnings: {len(val['warnings'])}, Fixed: {val['fixed_diagram']}")
+        print("Testing trace_execution tool...")
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as tf:
+            tf.write("def compute(x):\n    return x * 2\ncompute(21)\n")
+            tf_path = tf.name
+        try:
+            trace_res = trace_execution_impl(
+                command=f'python "{tf_path}"',
+                working_dir=os.path.dirname(tf_path),
+                export_html=False,
+            )
+            print(f"Trace tool status: success={trace_res.get('success', False)}, calls={trace_res.get('total_events', 0)}")
+        finally:
+            if os.path.exists(tf_path):
+                os.remove(tf_path)
         print("Self-test passed successfully!")
         return
 
