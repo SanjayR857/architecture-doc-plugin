@@ -833,9 +833,26 @@ def trace_execution_impl(
         return {"success": False, "error": f"Failed to execute tracer: {str(e)}"}
 
     out_text = proc.stdout.strip()
+    trace_data = None
     try:
         trace_data = json.loads(out_text)
     except Exception:
+        pass
+
+    if not isinstance(trace_data, dict):
+        # Target script may have printed to stdout; locate tracer payload by marker
+        marker = '"total_events"'
+        idx = out_text.find(marker)
+        if idx != -1:
+            start_brace = out_text.rfind("{", 0, idx)
+            end_brace = out_text.rfind("}")
+            if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                try:
+                    trace_data = json.loads(out_text[start_brace:end_brace + 1])
+                except Exception:
+                    pass
+
+    if not isinstance(trace_data, dict):
         return {
             "success": False,
             "error": "Failed to parse tracer JSON output",
