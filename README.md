@@ -99,6 +99,69 @@ python mcp/doc_mcp_server.py --test
 
 ---
 
+## 🔍 Execution Flow Tracing (`/trace-flow`)
+
+Debugging complex test cases or unfamiliar workflows by reading line-by-line is slow and error-prone. The `/trace-flow` command runs your test or Python script under a zero-dependency runtime tracer and automatically converts the execution path into a **Mermaid.js sequence diagram**, an **interactive HTML preview**, and a **step-by-step narrative**.
+
+### 1. Universal Test Framework Support
+
+Supports both **`unittest`** and **`pytest`** seamlessly:
+
+```bash
+# Run with Python standard unittest (zero external packages required)
+/trace-flow python -m unittest tests/test_order.py
+/trace-flow python tests/test_calculator.py
+
+# Run with pytest (in any environment with pytest installed)
+/trace-flow pytest tests/test_checkout.py
+/trace-flow pytest tests/test_order.py::test_discount_flow
+
+# Run any standalone Python script
+/trace-flow python scripts/seed_database.py
+```
+
+### 2. Smart Noise Filtering
+
+Standard test runners create hundreds of internal library calls (`_pytest`, `pluggy`, `unittest.runner`, `importlib`, `site-packages`). The tracer **automatically filters out framework noise**, recording exclusively your workspace application services, models, and test classes.
+
+### 3. What You Get
+
+#### A. Numbered Mermaid Sequence Diagram
+Depicts true nested function activation lifelines (`+` / `-`), normal returns (`-->>`), and exceptions (`--x`):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Test as test_order.py
+  participant Order as OrderProcessor
+  participant Discount as DiscountService
+
+  Test->>+Order: process_order(user='Alice', amount=100.0, code='VIP')
+  Order->>+Discount: apply(total=100.0, code='VIP')
+  Discount-->>-Order: return 80.0
+  Order-->>-Test: return {'status': 'CONFIRMED', 'total': 80.0}
+```
+
+#### B. Plain-English Execution Narrative
+Translates raw function calls into a clear, chronological story:
+- **Step 1:** `test_order.py` triggers `OrderProcessor.process_order` with `user='Alice'`, `amount=100.0`, `code='VIP'`.
+- **Step 2:** `OrderProcessor` delegates to `DiscountService.apply` to evaluate the `'VIP'` discount rule.
+- **Step 3:** `DiscountService` calculates 20% off and returns `80.0`.
+- **Step 4:** `OrderProcessor` returns confirmed order state.
+
+#### C. Variable & State Snapshot Table
+Inspect parameters, return values, and caller/callee relations:
+
+| Step | Caller | Target Function | Key Inputs | Return / Exception |
+|:----:|:-------|:----------------|:-----------|:-------------------|
+| 1 | `test_order.py` | `OrderProcessor.process_order` | `user='Alice', amount=100.0, code='VIP'` | `{'status': 'CONFIRMED'}` |
+| 2 | `OrderProcessor` | `DiscountService.apply` | `total=100.0, code='VIP'` | `80.0` |
+
+#### D. Interactive Browser Preview (`docs/trace-preview.html`)
+Double-click to open in any web browser with pan, zoom, copy-to-clipboard, and print-to-PDF capabilities.
+
+---
+
 ## 🪝 Automated Hooks (`examples/hooks.json`)
 
 Copy `examples/hooks.json` to `.claude/hooks.json` in your repository:
@@ -106,12 +169,6 @@ Copy `examples/hooks.json` to `.claude/hooks.json` in your repository:
 - 🔄 **Auto-diagram on architecture changes**: Automatically regenerates diagrams when files in `services/`, `models/`, or `routes/` are modified.
 - 📜 **Auto-spec on route changes**: Keeps API documentation up-to-date whenever route handlers change.
 - 🛡️ **Pre-commit freshness gate**: Ensures architecture documentation exists and is current before code is committed.
-
----
-
-## 🤝 Related Plugins
-
-- **[rag-builder-plugin](../rag-builder-plugin)** — Hands-on RAG pipeline development, chunking strategy comparison, and response evaluation for Claude Code.
 
 ---
 
