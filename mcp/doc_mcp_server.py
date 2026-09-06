@@ -122,8 +122,38 @@ def analyze_python_ast(file_path: Path, root_dir: Path) -> Dict[str, Any]:
     }
 
 
+def load_tsconfig_paths(root: Path) -> Dict[str, str]:
+    """Parse tsconfig.json or jsconfig.json to extract path aliases."""
+    for config_name in ["tsconfig.json", "jsconfig.json"]:
+        config_file = root / config_name
+        if config_file.exists():
+            try:
+                raw = config_file.read_text(encoding="utf-8", errors="replace")
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    lines = [l for l in raw.splitlines() if not l.strip().startswith("//")]
+                    data = json.loads("\n".join(lines))
+
+                compiler_opts = data.get("compilerOptions", {})
+                paths = compiler_opts.get("paths", {})
+                base_url = compiler_opts.get("baseUrl", ".")
+                resolved_aliases = {}
+                for alias_pattern, target_list in paths.items():
+                    if target_list:
+                        alias_prefix = alias_pattern.rstrip("*").rstrip("/")
+                        target_prefix = target_list[0].rstrip("*").rstrip("/")
+                        if base_url != ".":
+                            target_prefix = f"{base_url.rstrip('/')}/{target_prefix}"
+                        resolved_aliases[alias_prefix] = target_prefix.lstrip("./")
+                return resolved_aliases
+            except Exception:
+                pass
+    return {}
+
+
 def analyze_js_ts_file(file_path: Path, root_dir: Path) -> Dict[str, Any]:
-    """Extract imports from JavaScript / TypeScript file using regex."""
+    """Extract imports, interfaces, classes from JS/TS files."""
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -134,10 +164,14 @@ def analyze_js_ts_file(file_path: Path, root_dir: Path) -> Dict[str, Any]:
         }
 
     imports = []
+    classes = []
+    functions = []
+
     import_patterns = [
-        re.compile(r"""(?:import\s+.*?\s+from\s+['"]([^'"]+)['"])|(?:import\s+['"]([^'"]+)['"])"""),
+        re.compile(r"""(?:import\s+(?:type\s+)?.*?\s+from\s+['"]([^'"]+)['"])|(?:import\s+['"]([^'"]+)['"])"""),
         re.compile(r"""require\(['"]([^'"]+)['"]\)"""),
-        re.compile(r"""export\s+.*?\s+from\s+['"]([^'"]+)['"]"""),
+        re.compile(r"""export\s+(?:type\s+)?.*?\s+from\s+['"]([^'"]+)['"]"""),
+        re.compile(r"""import\(['"]([^'"]+)['"]\)"""),
     ]
 
     for pattern in import_patterns:
@@ -146,6 +180,16 @@ def analyze_js_ts_file(file_path: Path, root_dir: Path) -> Dict[str, Any]:
             if target:
                 imports.append({"module": target})
 
+    # Classes and interfaces
+    class_pattern = re.compile(r"""(?:export\s+)?(?:class|interface)\s+([a-zA-Z_0-9]+)""")
+    for m in class_pattern.finditer(content):
+        classes.append(m.group(1))
+
+    # Functions
+    func_pattern = re.compile(r"""(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_0-9]+)""")
+    for m in func_pattern.finditer(content):
+        functions.append(m.group(1))
+
     line_count = len(content.splitlines())
     rel_path = str(file_path.relative_to(root_dir)).replace("\\", "/")
 
@@ -153,6 +197,8 @@ def analyze_js_ts_file(file_path: Path, root_dir: Path) -> Dict[str, Any]:
         "file": rel_path,
         "line_count": line_count,
         "imports": imports,
+        "classes": classes,
+        "functions": functions,
     }
 
 
@@ -191,6 +237,7 @@ def parse_dependencies_impl(directory: str, file_types: str = "py,ts,js") -> Dic
         graph[rel] = set()
 
     all_module_names = {m: Path(m).stem for m in modules}
+    tsconfig_aliases = load_tsconfig_paths(root)
 
     for source_file, data in modules.items():
         source_dir = Path(source_file).parent
@@ -216,7 +263,29 @@ def parse_dependencies_impl(directory: str, file_types: str = "py,ts,js") -> Dic
                         target_match = normalized
                         break
 
-            # 2. Python relative imports with level
+            # 2. TypeScript / JS Path Aliases (tsconfig.json paths)
+            if not target_match and tsconfig_aliases:
+                for alias_prefix, target_prefix in tsconfig_aliases.items():
+                    if mod_str.startswith(alias_prefix):
+                        sub_path = mod_str[len(alias_prefix):].lstrip("/")
+                        candidate = f"{target_prefix}/{sub_path}".strip("/")
+                        possible_alias_targets = [
+                            candidate,
+                            f"{candidate}.ts",
+                            f"{candidate}.tsx",
+                            f"{candidate}.js",
+                            f"{candidate}/index.ts",
+                            f"{candidate}/index.js",
+                        ]
+                        for pt in possible_alias_targets:
+                            norm_pt = Path(pt).as_posix()
+                            if norm_pt in modules:
+                                target_match = norm_pt
+                                break
+                        if target_match:
+                            break
+
+            # 3. Python relative imports with level
             if not target_match and imp.get("level", 0) > 0:
                 level = imp["level"]
                 curr = source_dir
@@ -231,7 +300,7 @@ def parse_dependencies_impl(directory: str, file_types: str = "py,ts,js") -> Dic
                         target_match = m
                         break
 
-            # 3. Absolute matching by filename stem or path
+            # 4. Absolute matching by filename stem or path
             if not target_match and mod_str:
                 for m, stem in all_module_names.items():
                     if mod_str.endswith(stem) or mod_str.replace(".", "/") in m:
@@ -276,10 +345,12 @@ def parse_dependencies_impl(directory: str, file_types: str = "py,ts,js") -> Dic
             "is_hub": in_degree >= 3 or out_degree >= 4,
         }
 
-    layers = {"routes": [], "services": [], "models": [], "db": [], "utils": [], "core": []}
+    layers = {"frontend": [], "routes": [], "services": [], "models": [], "db": [], "utils": [], "core": []}
     for m in modules:
         low = m.lower()
-        if "route" in low or "controller" in low or "api" in low:
+        if "frontend" in low or "client" in low or "ui" in low or "view" in low:
+            layers["frontend"].append(m)
+        elif "route" in low or "controller" in low or "api" in low:
             layers["routes"].append(m)
         elif "service" in low or "business" in low or "use_case" in low:
             layers["services"].append(m)
