@@ -1,0 +1,763 @@
+#!/usr/bin/env python3
+"""
+Architecture Doc MCP Server
+===========================
+
+Deterministic codebase analysis and Mermaid.js diagramming tools for the
+architecture-doc-plugin.
+
+Tools exposed:
+  - parse_dependencies: AST and token-based module dependency extraction
+  - extract_api_routes: Deterministic REST API endpoint discovery
+  - validate_mermaid: Mermaid diagram syntax validator & linter
+  - export_html_preview: Generates self-contained interactive Mermaid preview HTML
+
+Usage:
+  # Register with Claude Code
+  claude mcp add doc-tools --scope user -- python path/to/doc_mcp_server.py
+
+  # Or run standalone for testing
+  python doc_mcp_server.py --test
+"""
+
+import ast
+import asyncio
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+try:
+    import mcp.types as types
+    from mcp.server.lowlevel.server import Server
+    from mcp.server.stdio import stdio_server
+except ImportError:
+    types = None
+    Server = None
+    stdio_server = None
+
+
+# ---------------------------------------------------------------------------
+# Core Analysis Engine
+# ---------------------------------------------------------------------------
+
+EXCLUDE_DIRS = {
+    "node_modules",
+    ".git",
+    "venv",
+    ".venv",
+    "env",
+    "__pycache__",
+    "dist",
+    "build",
+    ".next",
+    ".cache",
+    "target",
+    "bin",
+    "obj",
+}
+
+
+def find_files(root_dir: str, extensions: List[str]) -> List[Path]:
+    """Find files matching extensions while skipping ignored directories."""
+    matched = []
+    root = Path(root_dir).resolve()
+    if not root.exists():
+        return []
+
+    for path in root.rglob("*"):
+        if any(part in EXCLUDE_DIRS for part in path.parts):
+            continue
+        if path.is_file() and path.suffix.lower() in extensions:
+            matched.append(path)
+    return matched
+
+
+def analyze_python_ast(file_path: Path, root_dir: Path) -> Dict[str, Any]:
+    """Extract imports, classes, and functions from a Python file using AST."""
+    imports = []
+    classes = []
+    functions = []
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(content, filename=str(file_path))
+    except Exception as e:
+        return {
+            "file": str(file_path.relative_to(root_dir)).replace("\\", "/"),
+            "imports": [],
+            "classes": [],
+            "functions": [],
+            "error": str(e),
+        }
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imports.append({"module": alias.name, "is_from": False, "level": 0})
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            names = [alias.name for alias in node.names]
+            imports.append({
+                "module": module,
+                "names": names,
+                "is_from": True,
+                "level": node.level,
+            })
+        elif isinstance(node, ast.ClassDef):
+            classes.append(node.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(node.name)
+
+    line_count = len(content.splitlines())
+    rel_path = str(file_path.relative_to(root_dir)).replace("\\", "/")
+
+    return {
+        "file": rel_path,
+        "line_count": line_count,
+        "imports": imports,
+        "classes": classes,
+        "functions": functions,
+    }
+
+
+def analyze_js_ts_file(file_path: Path, root_dir: Path) -> Dict[str, Any]:
+    """Extract imports from JavaScript / TypeScript file using regex."""
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {
+            "file": str(file_path.relative_to(root_dir)).replace("\\", "/"),
+            "imports": [],
+            "error": str(e),
+        }
+
+    imports = []
+    import_patterns = [
+        re.compile(r"""(?:import\s+.*?\s+from\s+['"]([^'"]+)['"])|(?:import\s+['"]([^'"]+)['"])"""),
+        re.compile(r"""require\(['"]([^'"]+)['"]\)"""),
+        re.compile(r"""export\s+.*?\s+from\s+['"]([^'"]+)['"]"""),
+    ]
+
+    for pattern in import_patterns:
+        for match in pattern.finditer(content):
+            target = match.group(1) or match.group(2) if match.lastindex else match.group(0)
+            if target:
+                imports.append({"module": target})
+
+    line_count = len(content.splitlines())
+    rel_path = str(file_path.relative_to(root_dir)).replace("\\", "/")
+
+    return {
+        "file": rel_path,
+        "line_count": line_count,
+        "imports": imports,
+    }
+
+
+def parse_dependencies_impl(directory: str, file_types: str = "py,ts,js") -> Dict[str, Any]:
+    """Parse codebase dependencies, building node and edge graphs."""
+    root = Path(directory).resolve()
+    if not root.exists():
+        return {"error": f"Directory not found: {directory}"}
+
+    ext_map = {
+        "py": [".py"],
+        "ts": [".ts", ".tsx"],
+        "js": [".js", ".jsx", ".mjs"],
+        "go": [".go"],
+    }
+    requested_exts = []
+    for t in file_types.split(","):
+        clean_t = t.strip().lower().lstrip(".")
+        if clean_t in ext_map:
+            requested_exts.extend(ext_map[clean_t])
+        else:
+            requested_exts.append(f".{clean_t}")
+
+    files = find_files(str(root), requested_exts)
+    modules: Dict[str, Dict[str, Any]] = {}
+    edges: List[Dict[str, Any]] = []
+    graph: Dict[str, Set[str]] = {}
+
+    for f in files:
+        if f.suffix == ".py":
+            data = analyze_python_ast(f, root)
+        else:
+            data = analyze_js_ts_file(f, root)
+        rel = data["file"]
+        modules[rel] = data
+        graph[rel] = set()
+
+    all_module_names = {m: Path(m).stem for m in modules}
+
+    for source_file, data in modules.items():
+        source_dir = Path(source_file).parent
+        for imp in data.get("imports", []):
+            mod_str = imp.get("module", "")
+            target_match = None
+
+            # 1. Relative import resolution (Python . / .. or JS ./ ../)
+            if mod_str.startswith("."):
+                possible_targets = [
+                    (source_dir / mod_str).as_posix(),
+                    (source_dir / f"{mod_str}.ts").as_posix(),
+                    (source_dir / f"{mod_str}.tsx").as_posix(),
+                    (source_dir / f"{mod_str}.js").as_posix(),
+                    (source_dir / f"{mod_str}.py").as_posix(),
+                    (source_dir / mod_str / "index.ts").as_posix(),
+                    (source_dir / mod_str / "index.js").as_posix(),
+                    (source_dir / mod_str / "__init__.py").as_posix(),
+                ]
+                for pt in possible_targets:
+                    normalized = Path(pt).as_posix()
+                    if normalized in modules:
+                        target_match = normalized
+                        break
+
+            # 2. Python relative imports with level
+            if not target_match and imp.get("level", 0) > 0:
+                level = imp["level"]
+                curr = source_dir
+                for _ in range(level - 1):
+                    curr = curr.parent
+                if mod_str:
+                    target_name = (curr / mod_str).as_posix()
+                else:
+                    target_name = curr.as_posix()
+                for m in modules:
+                    if m.startswith(target_name) or Path(m).stem == mod_str:
+                        target_match = m
+                        break
+
+            # 3. Absolute matching by filename stem or path
+            if not target_match and mod_str:
+                for m, stem in all_module_names.items():
+                    if mod_str.endswith(stem) or mod_str.replace(".", "/") in m:
+                        target_match = m
+                        break
+
+            if target_match and target_match != source_file:
+                graph[source_file].add(target_match)
+                edges.append({
+                    "from": source_file,
+                    "to": target_match,
+                    "import": mod_str,
+                })
+
+    # Detect circular dependencies
+    cycles = []
+    visited: Set[str] = set()
+    stack: List[str] = []
+
+    def dfs(node: str):
+        visited.add(node)
+        stack.append(node)
+        for neighbor in graph.get(node, []):
+            if neighbor not in visited:
+                dfs(neighbor)
+            elif neighbor in stack:
+                cycle_slice = stack[stack.index(neighbor):] + [neighbor]
+                cycles.append(" -> ".join(cycle_slice))
+        stack.pop()
+
+    for node in list(graph.keys()):
+        if node not in visited:
+            dfs(node)
+
+    coupling = {}
+    for node in graph:
+        in_degree = sum(1 for src, targets in graph.items() if node in targets)
+        out_degree = len(graph[node])
+        coupling[node] = {
+            "in_degree": in_degree,
+            "out_degree": out_degree,
+            "is_hub": in_degree >= 3 or out_degree >= 4,
+        }
+
+    layers = {"routes": [], "services": [], "models": [], "db": [], "utils": [], "core": []}
+    for m in modules:
+        low = m.lower()
+        if "route" in low or "controller" in low or "api" in low:
+            layers["routes"].append(m)
+        elif "service" in low or "business" in low or "use_case" in low:
+            layers["services"].append(m)
+        elif "model" in low or "schema" in low or "entity" in low:
+            layers["models"].append(m)
+        elif "db" in low or "database" in low or "repo" in low or "sql" in low:
+            layers["db"].append(m)
+        elif "util" in low or "helper" in low or "common" in low:
+            layers["utils"].append(m)
+        else:
+            layers["core"].append(m)
+
+    return {
+        "root_directory": str(root),
+        "total_files_analyzed": len(modules),
+        "total_dependencies_found": len(edges),
+        "circular_dependencies": cycles,
+        "layers": layers,
+        "coupling": coupling,
+        "edges": edges,
+        "modules": {
+            k: {
+                "file": v["file"],
+                "line_count": v.get("line_count", 0),
+                "classes": v.get("classes", []),
+                "functions": v.get("functions", []),
+            }
+            for k, v in modules.items()
+        },
+    }
+
+
+def extract_api_routes_impl(directory: str) -> Dict[str, Any]:
+    """Scan Python and JS/TS files for REST endpoints."""
+    root = Path(directory).resolve()
+    if not root.exists():
+        return {"error": f"Directory not found: {directory}"}
+
+    routes = []
+    py_files = find_files(str(root), [".py"])
+    js_files = find_files(str(root), [".ts", ".tsx", ".js"])
+
+    fastapi_pattern = re.compile(
+        r"""@(app|router|api)\.(get|post|put|delete|patch|options|head)\(\s*['"]([^'"]+)['"](?:.*?)def\s+([a-zA-Z_0-9]+)\s*\((.*?)\)""",
+        re.DOTALL,
+    )
+    flask_pattern = re.compile(
+        r"""@(app|blueprint|[a-zA-Z_0-9]+)\.route\(\s*['"]([^'"]+)['"](?:\s*,\s*methods\s*=\s*\[(.*?)\])?(?:.*?)def\s+([a-zA-Z_0-9]+)\s*\((.*?)\)""",
+        re.DOTALL,
+    )
+
+    for pf in py_files:
+        content = pf.read_text(encoding="utf-8", errors="replace")
+        rel = str(pf.relative_to(root)).replace("\\", "/")
+
+        for m in fastapi_pattern.finditer(content):
+            router_var, method, path, func_name, params = m.groups()
+            clean_params = [p.strip() for p in params.split(",") if p.strip() and p.strip() != "self"]
+            routes.append({
+                "framework": "FastAPI",
+                "file": rel,
+                "method": method.upper(),
+                "path": path,
+                "handler": func_name,
+                "parameters": clean_params,
+            })
+
+        for m in flask_pattern.finditer(content):
+            _, path, methods_str, func_name, params = m.groups()
+            methods = [met.strip("'\" ") for met in methods_str.split(",")] if methods_str else ["GET"]
+            for met in methods:
+                routes.append({
+                    "framework": "Flask",
+                    "file": rel,
+                    "method": met.upper(),
+                    "path": path,
+                    "handler": func_name,
+                    "parameters": [p.strip() for p in params.split(",") if p.strip()],
+                })
+
+    express_pattern = re.compile(
+        r"""(?:app|router)\.(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]\s*,\s*(?:async\s*)?\((.*?)\)\s*=>""",
+    )
+    for jf in js_files:
+        content = jf.read_text(encoding="utf-8", errors="replace")
+        rel = str(jf.relative_to(root)).replace("\\", "/")
+
+        for m in express_pattern.finditer(content):
+            method, path, params = m.groups()
+            routes.append({
+                "framework": "Express/Hono",
+                "file": rel,
+                "method": method.upper(),
+                "path": path,
+                "handler": "anonymous",
+                "parameters": [p.strip() for p in params.split(",") if p.strip()],
+            })
+
+    return {
+        "total_routes_discovered": len(routes),
+        "routes": routes,
+    }
+
+
+def validate_mermaid_impl(diagram_code: str) -> Dict[str, Any]:
+    """Validate Mermaid.js syntax for common syntax traps and unquoted characters."""
+    errors = []
+    warnings = []
+    fixed_lines = []
+
+    code = diagram_code.strip()
+    if code.startswith("```"):
+        lines = code.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        code = "\n".join(lines).strip()
+
+    lines = code.splitlines()
+    if not lines:
+        return {"valid": False, "errors": ["Empty diagram code"], "warnings": [], "fixed_diagram": ""}
+
+    first_line = lines[0].strip()
+    valid_headers = [
+        "flowchart",
+        "graph",
+        "sequencediagram",
+        "classdiagram",
+        "erdiagram",
+        "statediagram",
+        "statediagram-v2",
+        "gantt",
+        "pie",
+        "gitgraph",
+    ]
+
+    matched_header = any(first_line.lower().startswith(vh) for vh in valid_headers)
+    if not matched_header:
+        errors.append(f"Invalid diagram header: '{first_line}'. Expected flowchart, sequenceDiagram, classDiagram, etc.")
+
+    subgraph_count = 0
+    end_count = 0
+
+    for i, line in enumerate(lines):
+        trimmed = line.strip()
+        if not trimmed or trimmed.startswith("%%"):
+            fixed_lines.append(line)
+            continue
+
+        if trimmed.startswith("subgraph"):
+            subgraph_count += 1
+        elif trimmed == "end":
+            end_count += 1
+
+        raw_label_match = re.search(r'\[([^[\]"]*?\([^[\]"]*?\)[^[\]"]*?)\]', line)
+        if raw_label_match:
+            warnings.append(f"Line {i+1}: Unquoted parentheses in label: '{raw_label_match.group(1)}'. Auto-wrapped in quotes.")
+            fixed_line = re.sub(
+                r'\[([^[\]"]*?\([^[\]"]*?\)[^[\]"]*?)\]',
+                r'["\1"]',
+                line
+            )
+            fixed_lines.append(fixed_line)
+        else:
+            fixed_lines.append(line)
+
+    if subgraph_count != end_count:
+        errors.append(f"Mismatched subgraphs: found {subgraph_count} 'subgraph' but {end_count} 'end' statements.")
+
+    valid = len(errors) == 0
+
+    return {
+        "valid": valid,
+        "errors": errors,
+        "warnings": warnings,
+        "fixed_diagram": "\n".join(fixed_lines),
+    }
+
+
+def export_html_preview_impl(
+    diagram_code: str,
+    title: str = "Architecture Diagram",
+    output_path: str = "docs/architecture-preview.html",
+) -> Dict[str, Any]:
+    """Generate a self-contained interactive Mermaid HTML preview."""
+    clean_code = diagram_code.strip()
+    if clean_code.startswith("```"):
+        lines = clean_code.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        clean_code = "\n".join(lines).strip()
+
+    safe_code = clean_code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title} — Interactive Preview</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({{
+      startOnLoad: true,
+      theme: 'neutral',
+      securityLevel: 'loose',
+      flowchart: {{ useMaxWidth: false, htmlLabels: true }}
+    }});
+  </script>
+  <style>
+    :root {{
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text: #f8fafc;
+      --border: #334155;
+      --accent: #38bdf8;
+    }}
+    body {{
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }}
+    header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--accent);
+    }}
+    .actions {{
+      display: flex;
+      gap: 12px;
+    }}
+    button {{
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }}
+    button:hover {{
+      background: var(--accent);
+      color: #0f172a;
+      border-color: var(--accent);
+    }}
+    .diagram-container {{
+      flex: 1;
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 32px;
+      overflow: auto;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 500px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }}
+    .mermaid {{
+      width: 100%;
+      display: flex;
+      justify-content: center;
+    }}
+    footer {{
+      margin-top: 24px;
+      text-align: center;
+      font-size: 0.875rem;
+      color: #94a3b8;
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📐 {title}</h1>
+    <div class="actions">
+      <button onclick="window.print()">🖨️ Print / Save PDF</button>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('raw-code').textContent); alert('Mermaid code copied!');">📋 Copy Code</button>
+    </div>
+  </header>
+
+  <div class="diagram-container">
+    <pre class="mermaid">
+{safe_code}
+    </pre>
+  </div>
+
+  <pre id="raw-code" style="display: none;">{clean_code}</pre>
+
+  <footer>
+    Generated by <strong>architecture-doc-plugin (v2.0.0)</strong> • Powered by Mermaid.js
+  </footer>
+</body>
+</html>
+"""
+    out_file = Path(output_path).resolve()
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(html_content, encoding="utf-8")
+
+    return {
+        "success": True,
+        "output_file": str(out_file),
+        "file_url": out_file.as_uri(),
+        "preview_message": f"Diagram preview generated at: {out_file.as_uri()}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# MCP Server Handlers
+# ---------------------------------------------------------------------------
+
+async def handle_list_tools(ctx, params) -> types.ListToolsResult:
+    return types.ListToolsResult(
+        tools=[
+            types.Tool(
+                name="parse_dependencies",
+                description=(
+                    "Extracts module dependencies, AST imports, circular dependencies, "
+                    "and architectural coupling across Python, TypeScript, and JavaScript codebases."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "directory": {
+                            "type": "string",
+                            "description": "Path to the codebase root directory to analyze",
+                        },
+                        "file_types": {
+                            "type": "string",
+                            "description": "Comma-separated extensions to include (default: 'py,ts,js')",
+                            "default": "py,ts,js",
+                        },
+                    },
+                    "required": ["directory"],
+                },
+            ),
+            types.Tool(
+                name="extract_api_routes",
+                description=(
+                    "Discovers REST API routes, HTTP methods, route paths, handler functions, "
+                    "and parameter types for FastAPI, Flask, Express, and Hono frameworks."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "directory": {
+                            "type": "string",
+                            "description": "Path to the project directory containing API route definitions",
+                        },
+                    },
+                    "required": ["directory"],
+                },
+            ),
+            types.Tool(
+                name="validate_mermaid",
+                description=(
+                    "Validates Mermaid.js diagram syntax, catches unquoted parenthesis bugs, "
+                    "detects unclosed subgraphs, and returns clean/auto-fixed diagram code."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "diagram_code": {
+                            "type": "string",
+                            "description": "The Mermaid.js diagram code to validate",
+                        },
+                    },
+                    "required": ["diagram_code"],
+                },
+            ),
+            types.Tool(
+                name="export_html_preview",
+                description=(
+                    "Generates an interactive, self-contained HTML page embedding Mermaid.js with "
+                    "zoom, pan, and print capabilities so the user can preview the diagram in a browser."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "diagram_code": {
+                            "type": "string",
+                            "description": "The Mermaid.js diagram code to render",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Title for the diagram document",
+                            "default": "Architecture Diagram",
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Path where the HTML preview should be saved (default: docs/architecture-preview.html)",
+                            "default": "docs/architecture-preview.html",
+                        },
+                    },
+                    "required": ["diagram_code"],
+                },
+            ),
+        ]
+    )
+
+
+async def handle_call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
+    name = params.name
+    arguments = params.arguments or {}
+
+    try:
+        if name == "parse_dependencies":
+            res = parse_dependencies_impl(
+                arguments.get("directory", "."),
+                arguments.get("file_types", "py,ts,js"),
+            )
+        elif name == "extract_api_routes":
+            res = extract_api_routes_impl(arguments.get("directory", "."))
+        elif name == "validate_mermaid":
+            res = validate_mermaid_impl(arguments.get("diagram_code", ""))
+        elif name == "export_html_preview":
+            res = export_html_preview_impl(
+                arguments.get("diagram_code", ""),
+                arguments.get("title", "Architecture Diagram"),
+                arguments.get("output_path", "docs/architecture-preview.html"),
+            )
+        else:
+            res = {"error": f"Unknown tool: {name}"}
+        return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(res, indent=2))])
+    except Exception as e:
+        return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps({"error": str(e)}))])
+
+
+def main():
+    """Main entry point."""
+    if "--test" in sys.argv:
+        print("Self-test mode:")
+        test_dir = str(Path(__file__).parent.parent)
+        print(f"Testing parse_dependencies on {test_dir}...")
+        res = parse_dependencies_impl(test_dir)
+        print(f"Analyzed files: {res.get('total_files_analyzed', 0)}")
+        val = validate_mermaid_impl("flowchart TD\n  A[Start (init)] --> B[End]")
+        print(f"Mermaid validation: {val['valid']}, Warnings: {len(val['warnings'])}, Fixed: {val['fixed_diagram']}")
+        print("Self-test passed successfully!")
+        return
+
+    if Server is None or stdio_server is None:
+        print(
+            "ERROR: 'mcp' package is not installed.\n"
+            "Run: pip install mcp>=1.0.0",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    server = Server(
+        name="doc-tools",
+        version="2.0.0",
+        on_list_tools=handle_list_tools,
+        on_call_tool=handle_call_tool,
+    )
+
+    async def run():
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()

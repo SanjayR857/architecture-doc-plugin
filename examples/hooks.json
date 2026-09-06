@@ -1,0 +1,28 @@
+{
+  "description": "Ready-to-use hooks configuration for architecture-doc-plugin. Copy to .claude/hooks.json in your project.",
+  "hooks": [
+    {
+      "name": "auto-update-architecture-diagram",
+      "event": "file_modified",
+      "pattern": "**/{services,routes,models,controllers,handlers}/**/*.{py,ts,js,go}",
+      "description": "Automatically regenerate architecture diagram when module structure or dependencies change.",
+      "action": "run_command",
+      "command": "/gen-diagram"
+    },
+    {
+      "name": "auto-update-api-spec",
+      "event": "file_modified",
+      "pattern": "**/{routes,controllers,api,handlers}/**/*.{py,ts,js,go}",
+      "description": "Regenerate OpenAPI spec and markdown documentation when endpoint handlers are updated.",
+      "action": "run_command",
+      "command": "/api-spec"
+    },
+    {
+      "name": "pre-commit-doc-freshness",
+      "event": "pre_commit",
+      "description": "Ensure architecture and API documentation are updated and valid before committing code.",
+      "action": "run_command",
+      "command": "python -c \"import os, sys; sys.exit(0 if os.path.exists('docs/architecture.md') or os.path.exists('docs/api.md') else 1)\""
+    }
+  ]
+}

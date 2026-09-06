@@ -1,0 +1,11 @@
+{
+  "name": "architecture-doc-plugin",
+  "description": "A production-grade codebase architecture documentation plugin for Claude Code. Features AST-level dependency graph extraction, deterministic API endpoint discovery, Mermaid.js diagram generation with syntax validation, interactive HTML previewing, and pre-commit documentation hooks.",
+  "version": "2.0.0",
+  "author": {
+    "name": "SanjayR857",
+    "url": "https://github.com/SanjayR857"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/SanjayR857/architecture-doc-plugin"
+}

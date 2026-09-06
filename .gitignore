@@ -1,0 +1,23 @@
+# Dependencies & virtual environments
+node_modules/
+venv/
+.venv/
+env/
+
+# Python cache & build
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Generated preview files
+docs/architecture-preview.html
+
+# Environment variables & secrets
+.env
+*.local
+
+# Logs
+*.log
