@@ -12,8 +12,12 @@ Extract real AST module dependency graphs, trace test execution flows into inter
 
 ### 1. Install Plugin
 ```bash
-/plugin marketplace add ./path/to/architecture-doc-plugin
-/plugin install architecture-doc-plugin
+# Add the marketplace repository (from GitHub or local path):
+claude plugin marketplace add SanjayR857/architecture-doc-plugin
+
+# Install the plugin (user or project scope):
+claude plugin install architecture-doc-plugin --scope user
+# (For Docker containers or CI, use: claude plugin install architecture-doc-plugin --scope project)
 ```
 
 ### 2. (Optional, Recommended) Enable Bundled MCP Server
@@ -48,6 +52,7 @@ claude mcp add doc-tools --scope user -- python mcp/doc_mcp_server.py
 ```
 architecture-doc-plugin/
 ├── .claude-plugin/
+│   ├── marketplace.json                # Marketplace registry catalog
 │   └── plugin.json                     # Plugin manifest (v2.2.0)
 ├── commands/
 │   ├── trace-flow.md                   # Runtime test tracer & Mermaid sequence diagram generator
