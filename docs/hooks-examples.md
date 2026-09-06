@@ -2,7 +2,7 @@
 
 This guide shows how to set up Claude Code hooks to **automate documentation** tasks using this plugin's commands.
 
-> **Note**: Hooks are configured at the user/project level in `.claude/hooks.json`, not inside the plugin itself. Copy the examples below into your project's hooks configuration.
+> **Note**: Hooks are configured at the user/project level in `.claude/hooks.json`, not inside the plugin itself. You can copy the ready-to-use template from [`examples/hooks.json`](../examples/hooks.json) directly into your workspace.
 
 ---
 
