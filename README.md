@@ -53,7 +53,7 @@ claude mcp add doc-tools --scope user -- python mcp/doc_mcp_server.py
 architecture-doc-plugin/
 ├── .claude-plugin/
 │   ├── marketplace.json                # Marketplace registry catalog
-│   └── plugin.json                     # Plugin manifest (v2.2.0)
+│   └── plugin.json                     # Plugin manifest (v2.3.0)
 ├── commands/
 │   ├── trace-flow.md                   # Runtime test tracer & Mermaid sequence diagram generator
 │   ├── gen-diagram.md                  # Mermaid diagram generator + syntax validation & HTML preview
